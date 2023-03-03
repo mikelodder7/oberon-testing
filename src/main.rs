@@ -267,33 +267,33 @@ fn main() {
     confidence_interval.creation_time = (zscore.creation_time * std_dev.creation_time) / sqr_count;
     println!(
         "      Creation time       + {}, - {}",
-        human_friendly(mean.creation_time + confidence_interval.creation_time),
-        human_friendly(mean.creation_time - confidence_interval.creation_time)
+        human_friendly(confidence_interval.creation_time),
+        human_friendly(confidence_interval.creation_time)
     );
     confidence_interval.verification_time =
         (zscore.verification_time * std_dev.verification_time) / sqr_count;
     println!(
         "      Verification time   + {}, - {}",
-        human_friendly(mean.verification_time + confidence_interval.verification_time),
-        human_friendly(mean.creation_time - confidence_interval.verification_time)
+        human_friendly(confidence_interval.verification_time),
+        human_friendly(confidence_interval.verification_time)
     );
     confidence_interval.proving_time = (zscore.proving_time * std_dev.proving_time) / sqr_count;
     println!(
         "      Proving time        + {}, - {}",
-        human_friendly(mean.proving_time + confidence_interval.proving_time),
-        human_friendly(mean.proving_time - confidence_interval.proving_time)
+        human_friendly(confidence_interval.proving_time),
+        human_friendly(confidence_interval.proving_time)
     );
     confidence_interval.open_time = (zscore.open_time * std_dev.open_time) / sqr_count;
     println!(
         "      Open time           + {}, - {}",
-        human_friendly(mean.open_time + confidence_interval.open_time),
-        human_friendly(mean.open_time - confidence_interval.open_time)
+        human_friendly(confidence_interval.open_time),
+        human_friendly(confidence_interval.open_time)
     );
     confidence_interval.blinding = (zscore.blinding * std_dev.blinding) / sqr_count;
     println!(
         "      Blinding time       + {}, - {}",
-        human_friendly(mean.blinding + confidence_interval.blinding),
-        human_friendly(mean.blinding - confidence_interval.blinding)
+        human_friendly(confidence_interval.blinding),
+        human_friendly(confidence_interval.blinding)
     );
 }
 
