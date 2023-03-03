@@ -424,26 +424,26 @@ fn main() {
     println!("   p-value: {:.3}", p_value);
 }
 
-fn print_friendly(stat: f64) {
-    let stat = stat as i128;
+fn print_friendly(s: f64) {
+    let stat = s as i128;
     let len = stat.to_string().len();
     match len {
-        1 | 2 | 3 => println!("{} ns", stat),
-        4 | 5 | 6 => println!("{} {}s", stat / 1_000, std::char::from_u32(0x00B5).unwrap()),
-        7 | 8 | 9 => println!("{} ms", stat / 1_000_000),
-        n => println!("{} s", n / 1_000_000_000)
+        1 | 2 | 3 => println!("{:.3} ns", s),
+        4 | 5 | 6 => println!("{:.3} {}s", s/ 1_000.0, std::char::from_u32(0x00B5).unwrap()),
+        7 | 8 | 9 => println!("{:.3} ms", s/ 1_000_000.0),
+        _ => println!("{:.3} s", s / 1_000_000_000.0)
     }
 }
 
-fn human_friendly(stat: f64) -> String {
-    let stat = stat as i128;
+fn human_friendly(s: f64) -> String {
+    let stat = s as i128;
     let len = stat.to_string().len();
     let mut output = Vec::<u8>::new();
     match len {
-        1 | 2 | 3 => write!(output, "{} ns", stat).unwrap(),
-        4 | 5 | 6 => write!(output, "{} {}s", stat / 1_000, std::char::from_u32(0x00B5).unwrap()).unwrap(),
-        7 | 8 | 9 => write!(output, "{} ms", stat / 1_000_000).unwrap(),
-        n => write!(output, "{} s", n / 1_000_000_000).unwrap()
+        1 | 2 | 3 => write!(output, "{:.3} ns", s).unwrap(),
+        4 | 5 | 6 => write!(output, "{:.3} {}s", s / 1_000.0, std::char::from_u32(0x00B5).unwrap()).unwrap(),
+        7 | 8 | 9 => write!(output, "{:.3} ms", s / 1_000_000.0).unwrap(),
+        _ => write!(output, "{:.3} s", s / 1_000_000_000.0).unwrap()
     }
     String::from_utf8(output).unwrap()
 }
