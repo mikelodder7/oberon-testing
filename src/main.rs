@@ -1,9 +1,53 @@
 use clap::Parser;
 use iso8601_timestamp::Timestamp;
 use oberon::*;
-use rand_core::{OsRng, RngCore};
+use rand_core::{OsRng, RngCore, CryptoRng, SeedableRng, Error};
+use rand_chacha::ChaChaRng;
+use rand_xorshift::XorShiftRng;
+use statrs::{
+    distribution::{FisherSnedecor, ContinuousCDF},
+    statistics::Statistics,
+};
 use std::io::{stdout, Write};
 use uuid::Uuid;
+
+struct CsXorShiftRng {
+    rng: XorShiftRng,
+}
+
+impl CryptoRng for CsXorShiftRng {}
+
+impl SeedableRng for CsXorShiftRng {
+    type Seed = [u8; 16];
+
+    fn from_seed(seed: Self::Seed) -> Self {
+        Self { rng: XorShiftRng::from_seed(seed) }
+    }
+}
+
+impl RngCore for CsXorShiftRng {
+    fn next_u32(&mut self) -> u32 {
+        self.rng.next_u32()
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.rng.next_u64()
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        self.rng.fill_bytes(dest)
+    }
+
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error> {
+        self.rng.try_fill_bytes(dest)
+    }
+}
+
+impl CsXorShiftRng {
+    pub fn from_entropy() -> Self {
+        Self { rng: XorShiftRng::from_entropy() }
+    }
+}
 
 #[derive(Parser, Clone, Debug)]
 struct Arguments {
@@ -29,7 +73,9 @@ struct Arguments {
 pub struct Sample {
     pub creation_time: i128,
     pub verification_time: i128,
-    pub proving_time: i128,
+    pub proving_time_osrng: i128,
+    pub proving_time_chacha: i128,
+    pub proving_time_xorshift: i128,
     pub open_time: i128,
     pub blinding: i128,
 }
@@ -38,7 +84,9 @@ pub struct Sample {
 pub struct SampleStatistics {
     pub creation_time: f64,
     pub verification_time: f64,
-    pub proving_time: f64,
+    pub proving_time_osrng: f64,
+    pub proving_time_chacha: f64,
+    pub proving_time_xorshift: f64,
     pub open_time: f64,
     pub blinding: f64,
 }
@@ -54,6 +102,9 @@ fn main() {
     println!("Generating {} samples", args.count);
     print!("Sample ");
     stdout().flush().unwrap();
+
+    let mut chacha_rng = ChaChaRng::from_entropy();
+    let mut xorshift_rng = CsXorShiftRng::from_entropy();
 
     for i in 1..=args.count {
         for b in &last_i_length {
@@ -89,6 +140,17 @@ fn main() {
         let after_prove = Timestamp::now_utc();
         let proof = proof.unwrap();
 
+        let before_prove_chacha = Timestamp::now_utc();
+        let proof_chacha = Proof::new(&token, &[], id_bytes, &nonce, &mut chacha_rng);
+        let after_prove_chacha = Timestamp::now_utc();
+        assert!(proof_chacha.is_some());
+
+
+        let before_prove_xorshift = Timestamp::now_utc();
+        let proof_xorshift = Proof::new(&token, &[], id_bytes, &nonce, &mut xorshift_rng);
+        let after_prove_xorshift = Timestamp::now_utc();
+        assert!(proof_xorshift.is_some());
+
         let before_open = Timestamp::now_utc();
         let open_choice = proof.open(pk, id_bytes, nonce);
         let after_open = Timestamp::now_utc();
@@ -106,7 +168,9 @@ fn main() {
             verification_time: after_verify
                 .duration_since(before_verify)
                 .whole_nanoseconds(),
-            proving_time: after_prove.duration_since(before_prove).whole_nanoseconds(),
+            proving_time_osrng: after_prove.duration_since(before_prove).whole_nanoseconds(),
+            proving_time_chacha: after_prove_chacha.duration_since(before_prove_chacha).whole_nanoseconds(),
+            proving_time_xorshift: after_prove_xorshift.duration_since(before_prove_xorshift).whole_nanoseconds(),
             open_time: after_open.duration_since(before_open).whole_nanoseconds(),
             blinding: after_blind.duration_since(before_blind).whole_nanoseconds(),
         })
@@ -131,8 +195,20 @@ fn main() {
     print_friendly(mean.verification_time);
     print!("      Proving time:      ");
     stdout().flush().unwrap();
-    mean.proving_time = samples.iter().map(|v| v.proving_time).sum::<i128>() as f64 / count;
-    print_friendly(mean.proving_time);
+    mean.proving_time_osrng = samples.iter().map(|v| v.proving_time_osrng).sum::<i128>() as f64 / count;
+    print_friendly(mean.proving_time_osrng);
+
+    print!("      Proving time CA    ");
+    stdout().flush().unwrap();
+    mean.proving_time_chacha = samples.iter().map(|v| v.proving_time_chacha).sum::<i128>() as f64 / count;
+    print_friendly(mean.proving_time_chacha);
+
+
+    print!("      Proving time XOR   ");
+    stdout().flush().unwrap();
+    mean.proving_time_xorshift = samples.iter().map(|v| v.proving_time_xorshift).sum::<i128>() as f64 / count;
+    print_friendly(mean.proving_time_xorshift);
+
     print!("      Open time:         ");
     stdout().flush().unwrap();
     mean.open_time = samples.iter().map(|v| v.open_time).sum::<i128>() as f64 / count;
@@ -172,20 +248,52 @@ fn main() {
         variance.sqrt()
     };
     print_friendly(std_dev.verification_time);
+
     print!("      Proving time:      ");
     stdout().flush().unwrap();
-    std_dev.proving_time = {
+    std_dev.proving_time_osrng = {
         let variance = samples
             .iter()
             .map(|s| {
-                let diff = mean.proving_time - (s.proving_time as f64);
+                let diff = mean.proving_time_osrng - (s.proving_time_osrng as f64);
                 diff * diff
             })
             .sum::<f64>()
             / count;
         variance.sqrt()
     };
-    print_friendly(std_dev.proving_time);
+    print_friendly(std_dev.proving_time_osrng);
+
+    print!("      Proving time CA:   ");
+    stdout().flush().unwrap();
+    std_dev.proving_time_chacha = {
+        let variance = samples
+            .iter()
+            .map(|s| {
+                let diff = mean.proving_time_chacha - (s.proving_time_chacha as f64);
+                diff * diff
+            })
+            .sum::<f64>()
+            / count;
+        variance.sqrt()
+    };
+    print_friendly(std_dev.proving_time_chacha);
+
+    print!("      Proving time XOR:  ");
+    stdout().flush().unwrap();
+    std_dev.proving_time_xorshift = {
+        let variance = samples
+            .iter()
+            .map(|s| {
+                let diff = mean.proving_time_xorshift - (s.proving_time_xorshift as f64);
+                diff * diff
+            })
+            .sum::<f64>()
+            / count;
+        variance.sqrt()
+    };
+    print_friendly(std_dev.proving_time_xorshift);
+
     print!("      Open time:         ");
     stdout().flush().unwrap();
     std_dev.open_time = {
@@ -215,48 +323,12 @@ fn main() {
     };
     print_friendly(std_dev.blinding);
 
-    // let mut zscore = SampleStatistics::default();
-    // let rnd_index = (OsRng.next_u64() % args.count) as usize;
-    // println!("   Z-score for samples at index {}", rnd_index);
-    // zscore.creation_time =
-    //     (samples[rnd_index].creation_time as f64 - mean.creation_time) / std_dev.creation_time;
-    // print!(
-    //     "      Creation time     (with value {}) is ",
-    //     samples[rnd_index].creation_time
-    // );
-    // print_friendly(zscore.creation_time);
-    // zscore.verification_time = (samples[rnd_index].verification_time as f64
-    //     - mean.verification_time)
-    //     / std_dev.verification_time;
-    // print!(
-    //     "      Verification time (with value {}) is ",
-    //     samples[rnd_index].verification_time
-    // );
-    // print_friendly(zscore.verification_time);
-    // zscore.proving_time =
-    //     (samples[rnd_index].proving_time as f64 - mean.proving_time) / std_dev.proving_time;
-    // print!(
-    //     "      Proving time      (with value {}) is ",
-    //     samples[rnd_index].proving_time
-    // );
-    // print_friendly(zscore.proving_time);
-    // zscore.open_time = (samples[rnd_index].open_time as f64 - mean.open_time) / std_dev.open_time;
-    // print!(
-    //     "      Open time         (with value {}) is {:?} ",
-    //     samples[rnd_index].open_time, zscore.open_time,
-    // );
-    // print_friendly(zscore.open_time);
-    // zscore.blinding = (samples[rnd_index].blinding as f64 - mean.blinding) / std_dev.blinding;
-    // print!(
-    //     "      Blinding time     (with value {}) is ",
-    //     samples[rnd_index].blinding
-    // );
-    // print_friendly(zscore.blinding);
-
     let zscore = SampleStatistics {
         creation_time: 1.96,
         verification_time: 1.96,
-        proving_time: 1.96,
+        proving_time_osrng: 1.96,
+        proving_time_chacha: 1.96,
+        proving_time_xorshift: 1.96,
         open_time: 1.96,
         blinding: 1.96,
     };
@@ -277,12 +349,27 @@ fn main() {
         human_friendly(confidence_interval.verification_time),
         human_friendly(confidence_interval.verification_time)
     );
-    confidence_interval.proving_time = (zscore.proving_time * std_dev.proving_time) / sqr_count;
+    confidence_interval.proving_time_osrng = (zscore.proving_time_osrng * std_dev.proving_time_osrng) / sqr_count;
     println!(
         "      Proving time        + {}, - {}",
-        human_friendly(confidence_interval.proving_time),
-        human_friendly(confidence_interval.proving_time)
+        human_friendly(confidence_interval.proving_time_osrng),
+        human_friendly(confidence_interval.proving_time_osrng)
     );
+
+    confidence_interval.proving_time_chacha = (zscore.proving_time_chacha * std_dev.proving_time_chacha) / sqr_count;
+    println!(
+        "      Proving time CA     + {}, - {}",
+        human_friendly(confidence_interval.proving_time_chacha),
+        human_friendly(confidence_interval.proving_time_chacha)
+    );
+
+    confidence_interval.proving_time_xorshift = (zscore.proving_time_xorshift * std_dev.proving_time_xorshift) / sqr_count;
+    println!(
+        "      Proving time XOR    + {}, - {}",
+        human_friendly(confidence_interval.proving_time_xorshift),
+        human_friendly(confidence_interval.proving_time_xorshift)
+    );
+
     confidence_interval.open_time = (zscore.open_time * std_dev.open_time) / sqr_count;
     println!(
         "      Open time           + {}, - {}",
@@ -295,6 +382,46 @@ fn main() {
         human_friendly(confidence_interval.blinding),
         human_friendly(confidence_interval.blinding)
     );
+
+    // Compute ANOVA
+    // 3 populations
+    let k = 3usize;
+    let n = (args.count * 3) as usize;
+    let means = [mean.proving_time_osrng, mean.proving_time_chacha, mean.proving_time_xorshift];
+    let grand_mean = means.mean();
+
+    let ss_between = means
+        .iter()
+        .map(| m| {
+            count * (m - grand_mean).powi(2)
+        })
+        .sum::<f64>();
+
+    let osrng = samples.iter().map(|s| s.proving_time_osrng as f64).collect::<Vec<f64>>();
+    let chacha = samples.iter().map(|s| s.proving_time_chacha as f64).collect::<Vec<f64>>();
+    let xorshift = samples.iter().map(|s| s.proving_time_xorshift as f64).collect::<Vec<f64>>();
+
+    let data = vec![osrng, chacha, xorshift];
+
+    let ss_within = data
+        .iter()
+        .enumerate()
+        .map(|(i, g)| sso(g, means[i]) - count * (means[i] - grand_mean).powi(2))
+        .sum::<f64>();
+
+    let df_between = k - 1;
+    let df_within = n - k;
+
+    let ms_between = ss_between / (df_between as f64);
+    let ms_within = ss_within / (df_within as f64);
+
+    let f_value = ms_between / ms_within;
+
+    let f_dist = FisherSnedecor::new(df_between as f64, df_within as f64).unwrap();
+    let p_value = 1.0 - f_dist.cdf(f_value);
+
+    println!("   F-value: {:.3}", f_value);
+    println!("   p-value: {:.3}", p_value);
 }
 
 fn print_friendly(stat: f64) {
@@ -319,4 +446,8 @@ fn human_friendly(stat: f64) -> String {
         n => write!(output, "{} s", n / 1_000_000_000).unwrap()
     }
     String::from_utf8(output).unwrap()
+}
+
+fn sso(group: &[f64], mean: f64) -> f64 {
+    group.iter().map(|x| (x - mean).powi(2)).sum()
 }
